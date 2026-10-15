@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JDM 三联表 · 仪表盘</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#08080a; color:#f5e6d3; min-height:100vh;
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:12px; padding:20px;
+  }
+
+  /* ===== 面板：宽度锁死，不受内部文字长度影响 =====
+     940 = 内容 676（3×212 + 2×20）+ 左右各 132 的留白
+     整体比例约 3.2 : 1，往 Defi DIN 面板那个扁长比例靠 */
+  .panel {
+    --glow:#ff9d2e; --num:#f0dcc0; --lbl:#f0dcc0; --spd:.6s;
+    --c:#ff9d2e; --cn:#f0dcc0; --cl:#f0dcc0;      /* 自定义色：刻度 / 数字 / 标签 */
+    width:940px;
+    background:linear-gradient(180deg,#141416,#0b0b0d);
+    border:1px solid #2a2a2e; border-radius:14px; padding:12px 132px 14px;
+    box-shadow:0 24px 70px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+  .panel.green { --glow:#7dff5a; --num:#b6ff9e; --lbl:#dfffd2; }
+  .panel.custom { --glow:var(--c); --num:var(--cn); --lbl:var(--cl); }
+  /* 关灯规则要放在最后：和 .custom 同时存在时由它接管，变成白刻度 */
+  .panel.off { --glow:#d8d8d8; --num:#ffffff; --lbl:#ffffff; }
+  .panel:not(.off) .tick { filter:drop-shadow(0 0 3px var(--glow)); }
+
+  /* ---- 顶部：标题贴左、徽章贴右 ----
+     用负 margin 抵消面板左右 132px 的内边距，让这一行横跨整个面板 */
+  .head { display:flex; justify-content:space-between; align-items:center;
+          margin:0 -132px 8px; padding:0 18px; gap:10px; }
+  .head h1 { font-size:13px; letter-spacing:3px; color:#7a7a82; font-weight:600; white-space:nowrap; }
+  .badge { font-size:11px; color:#c8892a; border:1px solid #3a2a10; background:#1a1206; padding:2px 9px; border-radius:10px;
+           min-width:92px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* ---- 三个表盘 ---- */
+  .gauges { display:flex; gap:20px; justify-content:center; }
+  .gauge { width:212px; flex:0 0 212px; text-align:center; }
+  .gauge svg { display:block; width:100%; height:auto; }
+  .dial { fill:#0d0d0f; }
+  .tick { stroke:var(--glow); stroke-linecap:round; }
+  .num { fill:var(--num); font-size:12px; font-weight:700; text-anchor:middle; dominant-baseline:central; }
+  .big { fill:var(--lbl); font-size:13px; font-weight:800; letter-spacing:1px; text-anchor:middle; dominant-baseline:central; }
+  .sub { fill:var(--glow); font-size:8px; font-weight:700; letter-spacing:1px; text-anchor:middle; dominant-baseline:central; }
+  .needle { fill:#ff2b2b; }
+  .needle-g { transform-box:view-box; transform-origin:100px 100px; transition:transform var(--spd,.6s) cubic-bezier(.25,.8,.35,1); }
+  .hub { fill:#191919; stroke:#3a3a40; stroke-width:1; }
+  .val { font-size:13px; color:var(--glow); margin-top:3px; font-variant-numeric:tabular-nums; }
+
+  /* ---- 第二块面板：硬件信息 + 独立控制栏 ---- */
+  .specs { display:flex; flex-direction:column; gap:5px; padding:0 0 10px; }
+  .spec { display:flex; align-items:baseline; gap:10px; font-size:11px; }
+  .spec .k { flex:0 0 40px; color:#6a6a72; font-weight:700; letter-spacing:1px; }
+  .spec .v { flex:1 1 auto; min-width:0; color:#d2d2d8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ctrl { display:flex; align-items:center; gap:8px; justify-content:flex-end;
+          border-top:1px solid #1e1e22; padding-top:12px; }
+  .lbl-mini { font-size:11px; color:#8a8a92; white-space:nowrap; }
+  .btn { font-size:11px; color:#9a9aa2; background:#1a1a1e; border:1px solid #2e2e34; padding:3px 10px; border-radius:10px;
+         cursor:pointer; min-width:56px; text-align:center; white-space:nowrap; }
+  .btn:hover { color:#e0e0e6; border-color:#4a4a52; }
+  #colorBtn { min-width:88px; }
+  #spd { width:96px; accent-color:#c8892a; cursor:pointer; vertical-align:middle; }
+  #spdVal { display:inline-block; min-width:40px; text-align:center; font-variant-numeric:tabular-nums; }
+
+  /* 自定义颜色取色块：平时藏起来，切到「自定义」才唤出 */
+  #colorPick {
+    display:none;
+    width:30px; height:24px; padding:0; border:1px solid #2e2e34; border-radius:7px;
+    background:#1a1a1e; cursor:pointer; flex:0 0 30px;
+  }
+  #panel2.custom #colorPick { display:block; }
+  #colorPick::-webkit-color-swatch-wrapper { padding:2px; }
+  #colorPick::-webkit-color-swatch { border:none; border-radius:5px; }
+</style>
+</head>
+<body>
+
+<!-- ================= 主面板：三个表盘 ================= -->
+<div class="panel" id="panel">
+  <div class="head">
+    <h1>JDM 3-GAUGE · DIN PANEL</h1>
+    <span class="badge" id="srcBadge">模拟数据</span>
+  </div>
+  <div class="gauges" id="gauges"></div>
+</div>
+
+<!-- ================= 硬件信息 + 独立控制栏 ================= -->
+<div class="panel" id="panel2">
+  <div class="specs">
+    <div class="spec"><span class="k">CPU</span><span class="v" id="specCpu">--</span></div>
+    <div class="spec"><span class="k">GPU</span><span class="v" id="specGpu">--</span></div>
+    <div class="spec"><span class="k">MEM</span><span class="v" id="specMem">--</span></div>
+    <div class="spec"><span class="k">SYS</span><span class="v" id="specSys">--</span></div>
+  </div>
+  <div class="ctrl">
+    <span class="lbl-mini">动画</span>
+    <input type="range" id="spd" min="0" max="2000" step="100" value="600">
+    <span class="lbl-mini" id="spdVal">0.6s</span>
+    <button class="btn" id="bootBtn">自检</button>
+    <button class="btn" id="colorBtn">颜色：琥珀</button>
+    <input type="color" id="colorPick" value="#ff9d2e" title="自定义颜色（点这里自己挑）">
+    <button class="btn" id="lightBtn">关灯</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  var CONFIG = [
+    { big:'LOAD',  sub:'cpu' },
+    { big:'BOOST', sub:'GPU' },
+    { big:'FUEL',  sub:'RAM' }
+  ];
+  var CX = 100, CY = 100, R = 95;
+  var A0 = 180, SWEEP = 270;              // 0% 在 6:00(180°)，顺时针 270° → 100% 在 3:00(90°)
+  var MARKS = [20, 40, 60, 80, 100];      // 照表盘：不标 0
+
+  function pt(angle, r) {
+    var a = angle * Math.PI / 180;
+    return [(CX + r * Math.sin(a)).toFixed(1), (CY - r * Math.cos(a)).toFixed(1)];
+  }
+
+  function buildGauge(cfg, idx) {
+    var s = '<svg viewBox="0 0 200 200">';
+    s += '<circle class="dial" cx="' + CX + '" cy="' + CY + '" r="' + R + '"/>';
+    s += '<circle cx="' + CX + '" cy="' + CY + '" r="' + R + '" fill="none" stroke="#2a2a2e" stroke-width="1.5"/>';
+
+    // 刻度：每 2% 一条；10% 的倍数为主刻度（长），其余副刻度（短）
+    for (var p = 0; p <= 100; p += 2) {
+      var th = A0 + (p / 100) * SWEEP;
+      var isMajor = (p % 10 === 0);
+      var r1 = pt(th, isMajor ? R - 13 : R - 7), r2 = pt(th, R - 2);
+      s += '<line class="tick" x1="' + r1[0] + '" y1="' + r1[1] + '" x2="' + r2[0] + '" y2="' + r2[1] +
+           '" stroke-width="' + (isMajor ? 2.6 : 1.3) + '" opacity="' + (isMajor ? '.95' : '.6') + '"/>';
+    }
+
+    // 数字（不标 0）
+    MARKS.forEach(function (v) {
+      var th = A0 + (v / 100) * SWEEP, p = pt(th, R - 27);
+      s += '<text class="num" x="' + p[0] + '" y="' + p[1] + '">' + v + '</text>';
+    });
+
+    // 功能标签：贴在 100 数字正下方（x 与 100 中心对齐）
+    s += '<text class="big" x="168" y="118">' + cfg.big + '</text>';
+    s += '<text class="sub" x="168" y="132">' + cfg.sub + '</text>';
+
+    // 指针（默认朝上，靠 transform 旋转）
+    s += '<g class="needle-g" id="needle' + idx + '">';
+    s += '<polygon class="needle" points="' + CX + ',' + (CY - 78) + ' ' + (CX - 3.2) + ',' + (CY + 12) + ' ' + (CX + 3.2) + ',' + (CY + 12) + '"/>';
+    s += '</g>';
+    s += '<circle class="hub" cx="' + CX + '" cy="' + CY + '" r="9"/>';
+    s += '<circle cx="' + CX + '" cy="' + CY + '" r="3.5" fill="#c8892a"/>';
+    s += '</svg>';
+
+    var d = document.createElement('div');
+    d.className = 'gauge';
+    d.innerHTML = s + '<div class="val" id="val' + idx + '">--</div>';
+    return d;
+  }
+
+  var box = document.getElementById('gauges');
+  CONFIG.forEach(function (c, i) { box.appendChild(buildGauge(c, i)); });
+
+  // ===== 给真实数据用的接口 =====
+  window.setGauge = function (idx, v) {
+    v = Math.max(0, Math.min(100, Number(v) || 0));
+    var angle = A0 + (v / 100) * SWEEP;
+    var n = document.getElementById('needle' + idx);
+    if (n) n.style.transform = 'rotate(' + angle.toFixed(1) + 'deg)';
+    var el = document.getElementById('val' + idx);
+    if (el) el.textContent = v.toFixed(0) + ' %';
+  };
+  window.setSource = function (txt) {
+    var b = document.getElementById('srcBadge');
+    if (b) b.textContent = txt;
+  };
+  // 硬件信息（由 server.js / main.js 的 /api/data 提供）
+  window.setSpecs = function (o) {
+    if (!o) return;
+    var set = function (id, v) {
+      var e = document.getElementById(id);
+      if (e && v != null && v !== '') e.textContent = v;
+    };
+    set('specCpu', o.cpuName);
+    set('specGpu', o.gpuName);
+    set('specMem', o.memText);
+    set('specSys', o.sysText);
+  };
+
+  // ================= 两块面板一起联动 =================
+  var panels = [document.getElementById('panel'), document.getElementById('panel2')];
+  var colorBtn = document.getElementById('colorBtn');
+  var lightBtn = document.getElementById('lightBtn');
+  var picker = document.getElementById('colorPick');
+
+  function eachPanel(fn) { panels.forEach(function (p) { if (p) fn(p); }); }
+  function hasAll(cls) { return !!(panels[0] && panels[0].classList.contains(cls)); }
+  function toggleAll(cls) { eachPanel(function (p) { p.classList.toggle(cls); }); }
+
+  // 把颜色往白里混，得到更亮的数字/标签色
+  function mixWhite(hex, ratio) {
+    var n = parseInt(String(hex).replace('#', ''), 16);
+    if (isNaN(n)) return hex;
+    var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.round(r + (255 - r) * ratio);
+    g = Math.round(g + (255 - g) * ratio);
+    b = Math.round(b + (255 - b) * ratio);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+
+  // ---- 配色三态：琥珀 → 绿 → 自定义 ----
+  var colorMode = 'amber';
+
+  function setColorMode(m) {
+    colorMode = m;
+    eachPanel(function (p) {
+      p.classList.toggle('green', m === 'green');
+      p.classList.toggle('custom', m === 'custom');
+      if (m === 'custom') {
+        var c = picker.value;
+        p.style.setProperty('--c', c);
+        p.style.setProperty('--cn', mixWhite(c, 0.55));
+        p.style.setProperty('--cl', mixWhite(c, 0.72));
+      }
+    });
+    colorBtn.textContent = m === 'amber' ? '颜色：琥珀' : (m === 'green' ? '颜色：绿' : '颜色：自定义');
+  }
+
+  colorBtn.addEventListener('click', function () {
+    setColorMode(colorMode === 'amber' ? 'green' : (colorMode === 'green' ? 'custom' : 'amber'));
+  });
+
+  // 调色板一动就切到自定义
+  picker.addEventListener('input', function () { setColorMode('custom'); });
+
+  // ---- 关灯（白刻度、不发光）----
+  lightBtn.addEventListener('click', function () {
+    toggleAll('off');
+    lightBtn.textContent = hasAll('off') ? '开灯' : '关灯';
+  });
+
+  // ---- 动画速度：0 = 关闭过渡，2000ms = 最慢 ----
+  var spd = document.getElementById('spd');
+  var spdVal = document.getElementById('spdVal');
+  function applySpeed() {
+    var ms = parseInt(spd.value, 10);
+    eachPanel(function (p) { p.style.setProperty('--spd', ms + 'ms'); });
+    spdVal.textContent = ms === 0 ? '关' : (ms / 1000).toFixed(1) + 's';
+  }
+  spd.addEventListener('input', applySpeed);
+  applySpeed();
+
+  // ===== 开机自检（三针扫满再回零，真车仪式）=====
+  var live = false;
+  var sweepTimers = [];
+  function bootSweep() {
+    sweepTimers.forEach(function (id) { clearTimeout(id); });
+    sweepTimers = [];
+    live = false;
+    [0, 1, 2].forEach(function (i) { window.setGauge(i, 0); });
+    sweepTimers.push(setTimeout(function () {
+      [0, 1, 2].forEach(function (i) { window.setGauge(i, 100); });
+    }, 400));
+    sweepTimers.push(setTimeout(function () {
+      [0, 1, 2].forEach(function (i) { window.setGauge(i, 0); });
+    }, 1700));
+    sweepTimers.push(setTimeout(function () { live = true; }, 2700));
+  }
+
+  // ===== 数据源 =====
+  // 用本地服务打开（http）→ 读真实数据；直接双击打开（file）→ 模拟数据
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    window.setSource('真实数据');
+    setInterval(function () {
+      fetch('/api/data', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          window.setSpecs(d);
+          if (!live) return;
+          window.setGauge(0, d.cpu);
+          window.setGauge(1, d.gpu >= 0 ? d.gpu : 0);
+          window.setGauge(2, d.mem);
+          window.setSource('真实数据');
+        })
+        .catch(function () { window.setSource('服务断开'); });
+    }, 300);
+  } else {
+    window.setSource('模拟数据');
+    window.setSpecs({
+      cpuName: '— 预览模式，硬件信息要打开服务才有 —',
+      gpuName: '—',
+      memText: '—',
+      sysText: '—'
+    });
+    var t = 0;
+    setInterval(function () {
+      if (!live) return;
+      t += 0.05;
+      window.setGauge(0, 50 + 45 * Math.sin(t));
+      window.setGauge(1, 55 + 40 * Math.sin(t * 0.73 + 2));
+      window.setGauge(2, 60 + 35 * Math.sin(t * 0.51 + 4));
+    }, 60);
+  }
+
+  // 「自检」按钮：随时重播扫表仪式
+  document.getElementById('bootBtn').addEventListener('click', bootSweep);
+
+  // 打开页面先自检，再进入实时显示
+  bootSweep();
+})();
+</script>
+</body>
+</html>
